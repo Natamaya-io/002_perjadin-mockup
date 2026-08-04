@@ -1,0 +1,26 @@
+[Unit]
+Description=Frontend SvelteKit Service
+Requires=perjadin-secrets.service perjadin-backend.service
+After=perjadin-secrets.service perjadin-backend.service
+
+[Container]
+ContainerName=perjadin-frontend
+Image=ghcr.io/myceldev-com/perjadin-kemnaker-ri-frontend:latest
+EnvironmentFile=/dev/shm/perjadin.env
+Network=perjadin.network
+PublishPort=3000:3000
+
+# Hardcoded non-secret internal routing via host.containers.internal to bypass broken IPv6 aardvark-dns
+Environment=INTERNAL_API_URL=http://host.containers.internal:8081
+Environment=HOST=0.0.0.0
+Environment=PORT=3000
+Environment=BODY_SIZE_LIMIT=52428800
+
+# Pull latest image automatically on restart
+AutoUpdate=registry
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,1209 @@
+<script lang="ts">
+    import { onMount } from 'svelte';
+    import { goto } from '$app/navigation';
+    import {
+        CalendarDays,
+        ChevronDown,
+        ChevronUp,
+        CircleDollarSign,
+        FileText,
+        MapPin,
+        Pencil,
+        Plus,
+        Printer,
+        RefreshCcw,
+        Search,
+        Trash2,
+        Users,
+        X
+    } from 'lucide-svelte';
+    import { api } from '$lib/shared/api';
+    import { toast } from '$lib/shared/stores/toast';
+
+    type DalkotOfficer = {
+        id: string;
+        dalkotId: string;
+        name: string;
+        nip: string;
+        position: string;
+        amount: number;
+        sortOrder: number;
+        createdAt: string;
+    };
+
+    type DalkotRow = {
+        id: string;
+        businessId: string;
+        activeEmail: string;
+        serviceDate: string;
+        category: string;
+        accompaniedOfficial: string;
+        dalkotType: 'SPJ_RILL' | 'KEBIJAKAN_PROTOKOL';
+        policyCategory?: string;
+        activityName: string;
+        location: string;
+        reportContent?: string;
+        status: 'DRAFT' | 'DIAJUKAN' | 'SELESAI' | 'DIBATALKAN';
+        totalAmount: number;
+        documentOriginalName?: string;
+        documentMime?: string;
+        documentSize?: number;
+        documentUrl?: string;
+        officerCount: number;
+        officers: DalkotOfficer[];
+        createdAt: string;
+        updatedAt: string;
+    };
+
+    type DalkotSummary = {
+        totalRecords: number;
+        totalOfficers: number;
+        totalAmount: number;
+        pendingRecords: number;
+    };
+
+    type DalkotResponse = {
+        rows: DalkotRow[];
+        summary: DalkotSummary;
+    };
+
+    const emptySummary = (): DalkotSummary => ({
+        totalRecords: 0,
+        totalOfficers: 0,
+        totalAmount: 0,
+        pendingRecords: 0
+    });
+
+    const monthOptions = [
+        ['01', 'Januari'],
+        ['02', 'Februari'],
+        ['03', 'Maret'],
+        ['04', 'April'],
+        ['05', 'Mei'],
+        ['06', 'Juni'],
+        ['07', 'Juli'],
+        ['08', 'Agustus'],
+        ['09', 'September'],
+        ['10', 'Oktober'],
+        ['11', 'November'],
+        ['12', 'Desember']
+    ];
+
+    let rows: DalkotRow[] = [];
+    let summary: DalkotSummary = emptySummary();
+    let loading = true;
+    let deleting = false;
+    let loadError = '';
+
+    let searchQuery = '';
+    let typeFilter = '';
+    let monthFilter = '';
+    let yearFilter = '';
+
+    let expandedIds = new Set<string>();
+    let deleteOpen = false;
+    let selectedRow: DalkotRow | null = null;
+
+    $: availableYears = Array.from(
+        new Set(
+            rows
+                .map((row) => row.serviceDate?.slice(0, 4))
+                .filter(Boolean)
+        )
+    ).sort((first, second) => Number(second) - Number(first));
+
+    $: filteredRows = rows.filter((row) => {
+        const keyword = searchQuery.trim().toLowerCase();
+
+        const matchSearch =
+            keyword === '' ||
+            row.businessId?.toLowerCase().includes(keyword) ||
+            row.activityName?.toLowerCase().includes(keyword) ||
+            row.location?.toLowerCase().includes(keyword) ||
+            row.accompaniedOfficial?.toLowerCase().includes(keyword) ||
+            row.category?.toLowerCase().includes(keyword) ||
+            row.officers?.some((officer) =>
+                officer.name?.toLowerCase().includes(keyword)
+            );
+
+        const matchType =
+            typeFilter === '' ||
+            row.dalkotType === typeFilter;
+
+        const matchMonth =
+            monthFilter === '' ||
+            row.serviceDate?.slice(5, 7) === monthFilter;
+
+        const matchYear =
+            yearFilter === '' ||
+            row.serviceDate?.slice(0, 4) === yearFilter;
+
+        return matchSearch && matchType && matchMonth && matchYear;
+    });
+
+    onMount(loadDalkot);
+
+    async function loadDalkot() {
+        loading = true;
+        loadError = '';
+
+        try {
+            const result = await (api as any).getDalkotList() as DalkotResponse;
+
+            rows = Array.isArray(result?.rows)
+                ? result.rows
+                : [];
+
+            summary = result?.summary ?? emptySummary();
+        } catch (error) {
+            loadError =
+                error instanceof Error
+                    ? error.message
+                    : 'Daftar Dalkot gagal dimuat.';
+
+            toast.error(loadError);
+        } finally {
+            loading = false;
+        }
+    }
+
+    function resetFilters() {
+        searchQuery = '';
+        typeFilter = '';
+        monthFilter = '';
+        yearFilter = '';
+    }
+
+    function toggleOfficers(id: string) {
+        const next = new Set(expandedIds);
+
+        if (next.has(id)) {
+            next.delete(id);
+        } else {
+            next.add(id);
+        }
+
+        expandedIds = next;
+    }
+
+    function openDelete(row: DalkotRow) {
+        selectedRow = row;
+        deleteOpen = true;
+    }
+
+    function closeDelete() {
+        if (deleting) return;
+
+        deleteOpen = false;
+        selectedRow = null;
+    }
+
+    async function deleteDalkot() {
+        if (!selectedRow) return;
+
+        deleting = true;
+
+        try {
+            await (api as any).deleteDalkot(selectedRow.id);
+            toast.success('Data Dalkot berhasil dihapus.');
+            deleteOpen = false;
+            selectedRow = null;
+            await loadDalkot();
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : 'Data Dalkot gagal dihapus.'
+            );
+        } finally {
+            deleting = false;
+        }
+    }
+
+    function formatRupiah(value: number): string {
+        return new Intl.NumberFormat('id-ID', {
+            style: 'currency',
+            currency: 'IDR',
+            maximumFractionDigits: 0
+        }).format(Number(value || 0));
+    }
+
+    function formatDate(value: string): string {
+        if (!value) return '-';
+
+        const normalized =
+            value.length === 10
+                ? `${value}T00:00:00`
+                : value;
+
+        const date = new Date(normalized);
+
+        if (Number.isNaN(date.getTime())) {
+            return value;
+        }
+
+        return new Intl.DateTimeFormat('id-ID', {
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric'
+        }).format(date);
+    }
+
+    function formatType(row: DalkotRow): string {
+        if (row.dalkotType === 'SPJ_RILL') {
+            return 'SPJ RILL';
+        }
+
+        return 'Kebijakan Protokol';
+    }
+
+    function formatPolicyCategory(value = ''): string {
+        const labels: Record<string, string> = {
+            JAM_KERJA: 'Jam Kerja',
+            OVERTIME: 'Overtime',
+            HARI_LIBUR: 'Hari Libur'
+        };
+
+        return labels[value] ?? value ?? '-';
+    }
+
+    function statusClass(status: DalkotRow['status']): string {
+        const classes: Record<DalkotRow['status'], string> = {
+            DRAFT: 'border-slate-200 bg-slate-100 text-slate-700',
+            DIAJUKAN: 'border-amber-200 bg-amber-50 text-amber-700',
+            SELESAI: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            DIBATALKAN: 'border-red-200 bg-red-50 text-red-700'
+        };
+
+        return classes[status];
+    }
+
+    function statusLabel(status: DalkotRow['status']): string {
+        const labels: Record<DalkotRow['status'], string> = {
+            DRAFT: 'Draft',
+            DIAJUKAN: 'Diajukan',
+            SELESAI: 'Selesai',
+            DIBATALKAN: 'Dibatalkan'
+        };
+
+        return labels[status];
+    }
+
+    function escapeHtml(value: unknown): string {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
+    function openPrintWindow(title: string, body: string) {
+        const printWindow = window.open('', '_blank', 'width=980,height=760');
+
+        if (!printWindow) {
+            toast.error('Popup cetak diblokir oleh peramban.');
+            return;
+        }
+
+        printWindow.document.open();
+        printWindow.document.write(`
+            <!doctype html>
+            <html lang="id">
+                <head>
+                    <meta charset="utf-8" />
+                    <title>${escapeHtml(title)}</title>
+                    <style>
+                        * { box-sizing: border-box; }
+                        body {
+                            font-family: Arial, sans-serif;
+                            margin: 0;
+                            color: #0f172a;
+                            background: #ffffff;
+                        }
+                        .page {
+                            width: 210mm;
+                            min-height: 297mm;
+                            margin: 0 auto;
+                            padding: 18mm 16mm;
+                        }
+                        .header {
+                            text-align: center;
+                            border-bottom: 3px solid #0f172a;
+                            padding-bottom: 12px;
+                            margin-bottom: 22px;
+                        }
+                        .header h1 {
+                            margin: 0;
+                            font-size: 18px;
+                            text-transform: uppercase;
+                        }
+                        .header p {
+                            margin: 5px 0 0;
+                            font-size: 12px;
+                        }
+                        .grid {
+                            display: grid;
+                            grid-template-columns: 180px 1fr;
+                            gap: 8px 14px;
+                            margin-bottom: 20px;
+                            font-size: 12px;
+                        }
+                        .label { font-weight: 700; }
+                        table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            margin-top: 14px;
+                            font-size: 11px;
+                        }
+                        th, td {
+                            border: 1px solid #475569;
+                            padding: 8px;
+                            vertical-align: top;
+                        }
+                        th {
+                            background: #e2e8f0;
+                            text-align: center;
+                        }
+                        .amount { text-align: right; white-space: nowrap; }
+                        .signature {
+                            margin-top: 48px;
+                            display: flex;
+                            justify-content: flex-end;
+                        }
+                        .signature-box {
+                            width: 260px;
+                            text-align: center;
+                            font-size: 12px;
+                        }
+                        .signature-space { height: 75px; }
+                        .actions {
+                            position: fixed;
+                            top: 16px;
+                            right: 16px;
+                        }
+                        .actions button {
+                            border: 0;
+                            border-radius: 8px;
+                            background: #0f172a;
+                            color: white;
+                            padding: 10px 16px;
+                            cursor: pointer;
+                        }
+                        @media print {
+                            .actions { display: none; }
+                            .page {
+                                width: auto;
+                                min-height: auto;
+                                margin: 0;
+                                padding: 0;
+                            }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="actions">
+                        <button onclick="window.print()">Cetak</button>
+                    </div>
+                    <div class="page">
+                        ${body}
+                    </div>
+                </body>
+            </html>
+        `);
+        printWindow.document.close();
+        printWindow.focus();
+    }
+
+    function printTravelReport(row: DalkotRow) {
+        const officerRows = row.officers
+            .map(
+                (officer, index) => `
+                    <tr>
+                        <td style="text-align:center">${index + 1}</td>
+                        <td>${escapeHtml(officer.name)}</td>
+                        <td>${escapeHtml(officer.nip || '-')}</td>
+                        <td>${escapeHtml(officer.position || '-')}</td>
+                        <td class="amount">${escapeHtml(formatRupiah(officer.amount))}</td>
+                    </tr>
+                `
+            )
+            .join('');
+
+        openPrintWindow(
+            `Laporan Perjalanan Dalkot ${row.businessId}`,
+            `
+                <div class="header">
+                    <h1>Laporan Perjalanan Dinas Dalam Kota</h1>
+                    <p>Protokol Kementerian Ketenagakerjaan Republik Indonesia</p>
+                </div>
+
+                <div class="grid">
+                    <div class="label">Nomor Data</div>
+                    <div>${escapeHtml(row.businessId)}</div>
+
+                    <div class="label">Tanggal Pelaksanaan</div>
+                    <div>${escapeHtml(formatDate(row.serviceDate))}</div>
+
+                    <div class="label">Jenis Dalkot</div>
+                    <div>${escapeHtml(formatType(row))}</div>
+
+                    <div class="label">Kategori</div>
+                    <div>${escapeHtml(
+                        row.dalkotType === 'KEBIJAKAN_PROTOKOL'
+                            ? formatPolicyCategory(row.policyCategory)
+                            : row.category
+                    )}</div>
+
+                    <div class="label">Pejabat Didampingi</div>
+                    <div>${escapeHtml(row.accompaniedOfficial)}</div>
+
+                    <div class="label">Nama Kegiatan</div>
+                    <div>${escapeHtml(row.activityName)}</div>
+
+                    <div class="label">Lokasi</div>
+                    <div>${escapeHtml(row.location)}</div>
+
+                    <div class="label">Isi Laporan</div>
+                    <div>${escapeHtml(row.reportContent || '-')}</div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:45px">No</th>
+                            <th>Nama Petugas</th>
+                            <th>NIP atau NRP</th>
+                            <th>Jabatan</th>
+                            <th style="width:140px">Biaya</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${officerRows || `
+                            <tr>
+                                <td colspan="5" style="text-align:center">Belum ada petugas.</td>
+                            </tr>
+                        `}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="4" style="text-align:right">Total</th>
+                            <th class="amount">${escapeHtml(formatRupiah(row.totalAmount))}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            `
+        );
+    }
+
+    function printDpr(row: DalkotRow, officer: DalkotOfficer) {
+        openPrintWindow(
+            `DPR ${officer.name}`,
+            `
+                <div class="header">
+                    <h1>Daftar Pengeluaran Riil</h1>
+                    <p>Perjalanan Dinas Dalam Kota</p>
+                </div>
+
+                <div class="grid">
+                    <div class="label">Nomor Surat</div>
+                    <div>${escapeHtml(row.businessId)}</div>
+
+                    <div class="label">Nama Petugas</div>
+                    <div>${escapeHtml(officer.name)}</div>
+
+                    <div class="label">NIP atau NRP</div>
+                    <div>${escapeHtml(officer.nip || '-')}</div>
+
+                    <div class="label">Jabatan</div>
+                    <div>${escapeHtml(officer.position || '-')}</div>
+
+                    <div class="label">Tanggal Pelaksanaan</div>
+                    <div>${escapeHtml(formatDate(row.serviceDate))}</div>
+
+                    <div class="label">Nama Kegiatan</div>
+                    <div>${escapeHtml(row.activityName)}</div>
+
+                    <div class="label">Lokasi</div>
+                    <div>${escapeHtml(row.location)}</div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:55px">No</th>
+                            <th>Uraian Pengeluaran</th>
+                            <th style="width:160px">Jumlah</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="text-align:center">1</td>
+                            <td>Transportasi perjalanan dinas dalam kota</td>
+                            <td class="amount">${escapeHtml(formatRupiah(officer.amount))}</td>
+                        </tr>
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <th colspan="2" style="text-align:right">Jumlah</th>
+                            <th class="amount">${escapeHtml(formatRupiah(officer.amount))}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+
+                <div class="signature">
+                    <div class="signature-box">
+                        <p>Yang menerima,</p>
+                        <div class="signature-space"></div>
+                        <strong>${escapeHtml(officer.name)}</strong>
+                        <p>${escapeHtml(officer.nip || '')}</p>
+                    </div>
+                </div>
+            `
+        );
+    }
+</script>
+
+<svelte:head>
+    <title>Daftar Dalkot | Perjadin</title>
+</svelte:head>
+
+<main class="space-y-6 pb-20">
+    <section
+        class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-slate-800 to-sky-900 p-6 text-white shadow-xl sm:p-8"
+    >
+        <div
+            class="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-sky-400/20 blur-3xl"
+        ></div>
+        <div
+            class="absolute -bottom-24 left-24 h-64 w-64 rounded-full bg-amber-300/10 blur-3xl"
+        ></div>
+
+        <div
+            class="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"
+        >
+            <div class="max-w-3xl">
+                <p
+                    class="text-xs font-bold uppercase tracking-[0.2em] text-sky-200"
+                >
+                    Perjalanan Dinas Dalam Kota
+                </p>
+
+                <h1 class="mt-3 text-3xl font-black sm:text-4xl">
+                    Daftar Dalkot
+                </h1>
+
+                <p class="mt-3 text-sm leading-6 text-slate-200 sm:text-base">
+                    Tinjau data perjalanan, total biaya, status, rincian petugas,
+                    laporan perjalanan, dan Daftar Pengeluaran Riil.
+                </p>
+            </div>
+
+            <button
+                type="button"
+                class="inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-400 px-5 py-3 text-sm font-bold text-slate-950 shadow-lg transition hover:bg-amber-300"
+                on:click={() => goto('/dashboard/dalkot/pengajuan')}
+            >
+                <Plus size={18} />
+                Tambah Pengajuan
+            </button>
+        </div>
+    </section>
+
+    {#if loadError}
+        <section
+            class="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700"
+        >
+            {loadError}
+
+            <button
+                type="button"
+                class="ml-2 font-bold underline"
+                on:click={loadDalkot}
+            >
+                Muat ulang
+            </button>
+        </section>
+    {/if}
+
+    <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-bold uppercase tracking-wide text-slate-400">
+                        Total Pengajuan
+                    </p>
+                    <p class="mt-2 text-2xl font-black text-slate-900">
+                        {summary.totalRecords}
+                    </p>
+                </div>
+
+                <div
+                    class="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-700"
+                >
+                    <FileText size={22} />
+                </div>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-bold uppercase tracking-wide text-slate-400">
+                        Total Petugas
+                    </p>
+                    <p class="mt-2 text-2xl font-black text-emerald-700">
+                        {summary.totalOfficers}
+                    </p>
+                </div>
+
+                <div
+                    class="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700"
+                >
+                    <Users size={22} />
+                </div>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-bold uppercase tracking-wide text-slate-400">
+                        Total Biaya
+                    </p>
+                    <p class="mt-2 text-xl font-black text-amber-700">
+                        {formatRupiah(summary.totalAmount)}
+                    </p>
+                </div>
+
+                <div
+                    class="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700"
+                >
+                    <CircleDollarSign size={22} />
+                </div>
+            </div>
+        </article>
+
+        <article class="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-bold uppercase tracking-wide text-slate-400">
+                        Menunggu Proses
+                    </p>
+                    <p class="mt-2 text-2xl font-black text-violet-700">
+                        {summary.pendingRecords}
+                    </p>
+                </div>
+
+                <div
+                    class="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 text-violet-700"
+                >
+                    <CalendarDays size={22} />
+                </div>
+            </div>
+        </article>
+    </section>
+
+    <section
+        class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+    >
+        <div
+            class="flex flex-col gap-4 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between sm:p-6"
+        >
+            <div>
+                <p class="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">
+                    Data Perjalanan
+                </p>
+
+                <h2 class="mt-2 text-xl font-black text-slate-900">
+                    Daftar Perjalanan Dinas Dalam Kota
+                </h2>
+
+                <p class="mt-1 text-sm text-slate-500">
+                    Gunakan rincian petugas untuk melihat biaya per orang dan mencetak DPR.
+                </p>
+            </div>
+
+            <div class="rounded-xl bg-slate-900 px-4 py-2 text-xs font-bold text-white">
+                {filteredRows.length} data
+            </div>
+        </div>
+
+        <div
+            class="grid grid-cols-1 gap-3 border-b border-slate-200 bg-slate-50/70 p-5 md:grid-cols-2 xl:grid-cols-5 sm:p-6"
+        >
+            <div class="xl:col-span-2">
+                <label
+                    for="dalkotSearch"
+                    class="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500"
+                >
+                    Pencarian
+                </label>
+
+                <div class="relative">
+                    <Search
+                        size={17}
+                        class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+
+                    <input
+                        id="dalkotSearch"
+                        bind:value={searchQuery}
+                        type="search"
+                        placeholder="Cari kegiatan, lokasi, pejabat, atau petugas..."
+                        class="w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-4 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-slate-800"
+                    />
+                </div>
+            </div>
+
+            <div>
+                <label
+                    for="dalkotType"
+                    class="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500"
+                >
+                    Jenis
+                </label>
+
+                <select
+                    id="dalkotType"
+                    bind:value={typeFilter}
+                    class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-slate-800"
+                >
+                    <option value="">Semua Jenis</option>
+                    <option value="SPJ_RILL">SPJ RILL</option>
+                    <option value="KEBIJAKAN_PROTOKOL">Kebijakan Protokol</option>
+                </select>
+            </div>
+
+            <div>
+                <label
+                    for="dalkotMonth"
+                    class="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500"
+                >
+                    Bulan
+                </label>
+
+                <select
+                    id="dalkotMonth"
+                    bind:value={monthFilter}
+                    class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-slate-800"
+                >
+                    <option value="">Semua Bulan</option>
+
+                    {#each monthOptions as month}
+                        <option value={month[0]}>
+                            {month[1]}
+                        </option>
+                    {/each}
+                </select>
+            </div>
+
+            <div>
+                <label
+                    for="dalkotYear"
+                    class="mb-2 block text-xs font-bold uppercase tracking-wide text-slate-500"
+                >
+                    Tahun
+                </label>
+
+                <div class="flex gap-2">
+                    <select
+                        id="dalkotYear"
+                        bind:value={yearFilter}
+                        class="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-slate-800"
+                    >
+                        <option value="">Semua Tahun</option>
+
+                        {#each availableYears as year}
+                            <option value={year}>
+                                {year}
+                            </option>
+                        {/each}
+                    </select>
+
+                    <button
+                        type="button"
+                        class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100"
+                        title="Reset filter"
+                        aria-label="Reset filter"
+                        on:click={resetFilters}
+                    >
+                        <RefreshCcw size={17} />
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full border-collapse text-left text-sm">
+                <thead class="bg-slate-50">
+                    <tr class="border-b border-slate-200">
+                        <th class="w-14 px-4 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                            No
+                        </th>
+                        <th class="min-w-[145px] px-4 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Tanggal
+                        </th>
+                        <th class="min-w-[260px] px-4 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Kegiatan
+                        </th>
+                        <th class="min-w-[180px] px-4 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Jenis
+                        </th>
+                        <th class="min-w-[220px] px-4 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Pejabat dan Lokasi
+                        </th>
+                        <th class="min-w-[110px] px-4 py-4 text-center text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Petugas
+                        </th>
+                        <th class="min-w-[150px] px-4 py-4 text-right text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Total Biaya
+                        </th>
+                        <th class="min-w-[120px] px-4 py-4 text-center text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Status
+                        </th>
+                        <th class="min-w-[190px] px-4 py-4 text-center text-xs font-bold uppercase tracking-wide text-slate-500">
+                            Aksi
+                        </th>
+                    </tr>
+                </thead>
+
+                <tbody class="divide-y divide-slate-100">
+                    {#if loading}
+                        <tr>
+                            <td colspan="9" class="p-0">
+                                <div
+                                    class="flex min-h-80 items-center justify-center text-sm text-slate-500"
+                                >
+                                    Memuat daftar Dalkot...
+                                </div>
+                            </td>
+                        </tr>
+                    {:else if filteredRows.length === 0}
+                        <tr>
+                            <td colspan="9" class="p-0">
+                                <div
+                                    class="flex min-h-80 flex-col items-center justify-center px-6 text-center"
+                                >
+                                    <div
+                                        class="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400"
+                                    >
+                                        <FileText size={30} />
+                                    </div>
+
+                                    <p class="mt-4 font-bold text-slate-800">
+                                        Data Dalkot tidak ditemukan
+                                    </p>
+
+                                    <p class="mt-1 text-sm text-slate-500">
+                                        Tambahkan pengajuan baru atau ubah filter pencarian.
+                                    </p>
+                                </div>
+                            </td>
+                        </tr>
+                    {:else}
+                        {#each filteredRows as row, index (row.id)}
+                            <tr class="bg-white align-top transition hover:bg-slate-50/70">
+                                <td class="px-4 py-5 font-bold text-slate-700">
+                                    {filteredRows.length - index}
+                                </td>
+
+                                <td class="px-4 py-5">
+                                    <p class="whitespace-nowrap font-semibold text-slate-800">
+                                        {formatDate(row.serviceDate)}
+                                    </p>
+                                    <p class="mt-1 text-xs text-slate-400">
+                                        {row.businessId}
+                                    </p>
+                                </td>
+
+                                <td class="px-4 py-5">
+                                    <p class="font-bold text-slate-900">
+                                        {row.activityName}
+                                    </p>
+                                    <p class="mt-1 text-xs text-slate-500">
+                                        {row.category || '-'}
+                                    </p>
+                                </td>
+
+                                <td class="px-4 py-5">
+                                    <span
+                                        class:bg-blue-50={row.dalkotType === 'SPJ_RILL'}
+                                        class:border-blue-200={row.dalkotType === 'SPJ_RILL'}
+                                        class:text-blue-700={row.dalkotType === 'SPJ_RILL'}
+                                        class:bg-violet-50={row.dalkotType === 'KEBIJAKAN_PROTOKOL'}
+                                        class:border-violet-200={row.dalkotType === 'KEBIJAKAN_PROTOKOL'}
+                                        class:text-violet-700={row.dalkotType === 'KEBIJAKAN_PROTOKOL'}
+                                        class="inline-flex rounded-full border px-3 py-1 text-xs font-bold"
+                                    >
+                                        {formatType(row)}
+                                    </span>
+
+                                    {#if row.dalkotType === 'KEBIJAKAN_PROTOKOL'}
+                                        <p class="mt-2 text-xs text-slate-500">
+                                            {formatPolicyCategory(row.policyCategory)}
+                                        </p>
+                                    {/if}
+                                </td>
+
+                                <td class="px-4 py-5">
+                                    <p class="font-semibold text-slate-800">
+                                        {row.accompaniedOfficial || '-'}
+                                    </p>
+
+                                    <p class="mt-2 flex items-start gap-1.5 text-xs text-slate-500">
+                                        <MapPin size={14} class="mt-0.5 shrink-0" />
+                                        <span>{row.location || '-'}</span>
+                                    </p>
+                                </td>
+
+                                <td class="px-4 py-5 text-center">
+                                    <button
+                                        type="button"
+                                        class="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-200"
+                                        aria-expanded={expandedIds.has(row.id)}
+                                        on:click={() => toggleOfficers(row.id)}
+                                    >
+                                        <Users size={15} />
+                                        {row.officerCount}
+
+                                        {#if expandedIds.has(row.id)}
+                                            <ChevronUp size={14} />
+                                        {:else}
+                                            <ChevronDown size={14} />
+                                        {/if}
+                                    </button>
+                                </td>
+
+                                <td class="px-4 py-5 text-right font-black text-slate-900">
+                                    {formatRupiah(row.totalAmount)}
+                                </td>
+
+                                <td class="px-4 py-5 text-center">
+                                    <span
+                                        class={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${statusClass(row.status)}`}
+                                    >
+                                        {statusLabel(row.status)}
+                                    </span>
+                                </td>
+
+                                <td class="px-4 py-5">
+                                    <div class="flex items-center justify-center gap-2">
+                                        <button
+                                            type="button"
+                                            class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700 transition hover:bg-blue-100"
+                                            title="Cetak laporan perjalanan"
+                                            aria-label="Cetak laporan perjalanan Dalkot"
+                                            on:click={() => printTravelReport(row)}
+                                        >
+                                            <FileText size={17} />
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            class="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-700 transition hover:bg-amber-100"
+                                            title="Edit pengajuan"
+                                            aria-label="Edit pengajuan Dalkot"
+                                            on:click={() =>
+                                                goto(`/dashboard/dalkot/pengajuan?id=${encodeURIComponent(row.id)}`)}
+                                        >
+                                            <Pencil size={17} />
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            class="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
+                                            title="Buka rincian petugas"
+                                            aria-label="Buka rincian petugas"
+                                            on:click={() => toggleOfficers(row.id)}
+                                        >
+                                            <Users size={17} />
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            class="flex h-9 w-9 items-center justify-center rounded-lg bg-red-50 text-red-700 transition hover:bg-red-100"
+                                            title="Hapus data"
+                                            aria-label="Hapus data Dalkot"
+                                            on:click={() => openDelete(row)}
+                                        >
+                                            <Trash2 size={17} />
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+
+                            {#if expandedIds.has(row.id)}
+                                <tr class="bg-slate-50/80">
+                                    <td colspan="9" class="px-5 py-5">
+                                        <div
+                                            class="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                                        >
+                                            <div
+                                                class="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+                                            >
+                                                <div>
+                                                    <h3 class="font-black text-slate-900">
+                                                        Rincian Petugas
+                                                    </h3>
+                                                    <p class="mt-1 text-xs text-slate-500">
+                                                        Biaya per petugas dan keluaran DPR.
+                                                    </p>
+                                                </div>
+
+                                                <span
+                                                    class="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700"
+                                                >
+                                                    {row.officerCount} petugas
+                                                </span>
+                                            </div>
+
+                                            <div class="overflow-x-auto">
+                                                <table class="min-w-full text-sm">
+                                                    <thead class="bg-slate-50">
+                                                        <tr class="border-b border-slate-200">
+                                                            <th class="w-14 px-4 py-3 text-left text-xs font-bold uppercase text-slate-500">
+                                                                No
+                                                            </th>
+                                                            <th class="min-w-[220px] px-4 py-3 text-left text-xs font-bold uppercase text-slate-500">
+                                                                Nama
+                                                            </th>
+                                                            <th class="min-w-[170px] px-4 py-3 text-left text-xs font-bold uppercase text-slate-500">
+                                                                NIP atau NRP
+                                                            </th>
+                                                            <th class="min-w-[220px] px-4 py-3 text-left text-xs font-bold uppercase text-slate-500">
+                                                                Jabatan
+                                                            </th>
+                                                            <th class="min-w-[150px] px-4 py-3 text-right text-xs font-bold uppercase text-slate-500">
+                                                                Biaya
+                                                            </th>
+                                                            <th class="w-24 px-4 py-3 text-center text-xs font-bold uppercase text-slate-500">
+                                                                DPR
+                                                            </th>
+                                                        </tr>
+                                                    </thead>
+
+                                                    <tbody class="divide-y divide-slate-100">
+                                                        {#if row.officers.length === 0}
+                                                            <tr>
+                                                                <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500">
+                                                                    Belum ada rincian petugas.
+                                                                </td>
+                                                            </tr>
+                                                        {:else}
+                                                            {#each row.officers as officer, officerIndex (officer.id)}
+                                                                <tr>
+                                                                    <td class="px-4 py-4 font-semibold text-slate-600">
+                                                                        {officerIndex + 1}
+                                                                    </td>
+                                                                    <td class="px-4 py-4 font-bold text-slate-900">
+                                                                        {officer.name}
+                                                                    </td>
+                                                                    <td class="px-4 py-4 text-slate-600">
+                                                                        {officer.nip || '-'}
+                                                                    </td>
+                                                                    <td class="px-4 py-4 text-slate-600">
+                                                                        {officer.position || '-'}
+                                                                    </td>
+                                                                    <td class="px-4 py-4 text-right font-black text-slate-900">
+                                                                        {formatRupiah(officer.amount)}
+                                                                    </td>
+                                                                    <td class="px-4 py-4 text-center">
+                                                                        <button
+                                                                            type="button"
+                                                                            class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700"
+                                                                            on:click={() => printDpr(row, officer)}
+                                                                        >
+                                                                            <Printer size={14} />
+                                                                            DPR
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            {/each}
+                                                        {/if}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            {/if}
+                        {/each}
+                    {/if}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</main>
+
+{#if deleteOpen && selectedRow}
+    <div
+        class="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-4"
+        role="presentation"
+        on:click={(event) => {
+            if (event.currentTarget === event.target) {
+                closeDelete();
+            }
+        }}
+    >
+        <div
+            class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="deleteDalkotTitle"
+        >
+            <div class="flex items-start justify-between gap-4">
+                <div
+                    class="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100 text-red-700"
+                >
+                    <Trash2 size={22} />
+                </div>
+
+                <button
+                    type="button"
+                    class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    aria-label="Tutup konfirmasi hapus"
+                    disabled={deleting}
+                    on:click={closeDelete}
+                >
+                    <X size={18} />
+                </button>
+            </div>
+
+            <h2
+                id="deleteDalkotTitle"
+                class="mt-5 text-xl font-black text-slate-900"
+            >
+                Hapus data Dalkot?
+            </h2>
+
+            <p class="mt-2 text-sm leading-6 text-slate-500">
+                Data
+                <strong class="text-slate-800">
+                    {selectedRow.activityName}
+                </strong>
+                beserta rincian petugas akan dihapus permanen.
+            </p>
+
+            <div class="mt-6 flex justify-end gap-3">
+                <button
+                    type="button"
+                    class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    disabled={deleting}
+                    on:click={closeDelete}
+                >
+                    Batal
+                </button>
+
+                <button
+                    type="button"
+                    class="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                    disabled={deleting}
+                    on:click={deleteDalkot}
+                >
+                    {deleting ? 'Menghapus...' : 'Hapus'}
+                </button>
+            </div>
+        </div>
+    </div>
+{/if}

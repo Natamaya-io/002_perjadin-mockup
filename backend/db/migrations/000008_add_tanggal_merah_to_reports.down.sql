@@ -1,0 +1,1 @@
+ALTER TABLE travel_reports DROP COLUMN tanggal_merah;

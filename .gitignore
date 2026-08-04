@@ -1,0 +1,38 @@
+node_modules
+
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+frontend/.svelte-kit
+frontend/build
+
+# OS
+.DS_Store
+Thumbs.db
+~$*
+
+# Env (Safety net for Doppler users)
+.env
+.env.*
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Gemini & Cursor config
+query
+.geminiignore
+.cursorrules
+clean_local_db.ps1
+*.exe
+*.dump
+*.dump.gz
+MODUL_LANJUTAN_PERJADIN.docx
+
+# AI Documentation & Blueprints
+MASTER_BLUEPRINT_*.docx
+*.docx
+prod_dump.sql
+backend/uploads/

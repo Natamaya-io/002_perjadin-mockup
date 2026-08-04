@@ -1,0 +1,1 @@
+ALTER TABLE travel_reports ADD COLUMN tanggal_merah JSONB;

@@ -1,0 +1,19 @@
+[Unit]
+Description=Redis Cache Container
+Requires=perjadin-secrets.service
+After=perjadin-secrets.service
+
+[Container]
+ContainerName=perjadin-redis
+Image=public.ecr.aws/docker/library/redis:7-alpine
+EnvironmentFile=/dev/shm/perjadin.env
+Network=perjadin.network
+Volume=perjadin-redis.volume:/data
+# Exec string is appended to the container entrypoint
+Exec=redis-server --requirepass "${REDIS_PASSWORD}"
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

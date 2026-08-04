@@ -1,0 +1,1 @@
+ALTER TABLE travel_costs DROP COLUMN IF EXISTS details;

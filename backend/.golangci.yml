@@ -1,0 +1,33 @@
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  disable-all: true
+  enable:
+    - govet         # memory alignment issues, shadowing, etc.
+    - errcheck      # unhandled errors
+    - ineffassign   # detect when assignments to existing variables are not used
+    - staticcheck   # drop-in replacement for go vet
+    - typecheck     # standard go type checker
+    - unused        # check for unused constants, variables, functions and types
+    - gosimple      # specialize in simplifying code
+    - bodyclose     # goroutine leaks / unclosed bodies
+    - sqlclosecheck # goroutine/db leaks
+    - noctx         # context leak/usage
+    - unparam       # unused params
+    - gocritic      # additional style and performance checks
+
+linters-settings:
+  govet:
+    enable-all: true
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+issues:
+  exclude-dirs:
+    - db/migrations
+    - pkg/database
+  max-issues-per-linter: 0
+  max-same-issues: 0

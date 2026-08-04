@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS dalkot_assignments;
+DROP TABLE IF EXISTS dalkot_documents;
+DROP TABLE IF EXISTS dalkot;
+DROP TABLE IF EXISTS protocol_officers;
+DROP TABLE IF EXISTS gup_transactions;
+DROP TABLE IF EXISTS monthly_ls;
+DROP TABLE IF EXISTS budgets;
+DROP TABLE IF EXISTS funding_sources;
+DROP TABLE IF EXISTS procurement_types;
+DROP TABLE IF EXISTS account_codes;

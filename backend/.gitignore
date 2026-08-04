@@ -1,0 +1,15 @@
+main.exe
+api.exe
+sqlc_output.txt
+sqlc.log
+sqlc.zip
+cmd/seeder_huge/main
+cmd/seeder_huge/main.exe
+coverage.out
+
+# Ignored binaries, temp folders, and logs
+main
+test_backend
+tmp_bin
+lint_errors.txt
+tmp/

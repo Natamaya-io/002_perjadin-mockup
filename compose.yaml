@@ -1,0 +1,131 @@
+version: '3.8'
+
+services:
+  # ==============================================
+  # Database Service (PostgreSQL)
+  # ==============================================
+  db:
+    image: public.ecr.aws/docker/library/postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME}_db
+    environment:
+      - POSTGRES_USER=${DB_USER:-perjadin_user}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-Yuxt2MaJxNhpfvJzCyNEbVTG4JgtpwXH}
+      - POSTGRES_DB=${DB_NAME:-perjadin_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ==============================================
+  # Redis Service (Caching & Session Store)
+  # ==============================================
+  redis:
+    image: public.ecr.aws/docker/library/redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME}_redis
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --requirepass "${REDIS_PASSWORD}"
+
+  # ==============================================
+  # Backend Service (Go API)
+  # ==============================================
+  backend:
+    image: ghcr.io/raxbyte-org/perjadin-kemnaker-ri-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME}_backend
+    environment:
+      # Use the 'db' service name for internal container networking
+      - DB_HOST=${DB_HOST:-db}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-perjadin_db}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - APP_PORT=${APP_PORT}
+      - SEED_DB=true
+      - ALLOW_CLEANUP=${ALLOW_CLEANUP:-false}
+      - GIN_MODE=${GIN_MODE}
+      - FONNTE_API=${FONNTE_API}
+      - GOTENBERG_URL=http://${COMPOSE_PROJECT_NAME}_gotenberg:3000
+    ports:
+      - "${APP_PORT}:${APP_PORT}"
+      - "6060:6060" # Port Pprof Telemetry
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - backend_uploads:/app/uploads
+    restart: unless-stopped
+
+  # ==============================================
+  # Gotenberg Service (PDF Generation)
+  # ==============================================
+  gotenberg:
+    image: docker.io/gotenberg/gotenberg:8
+    container_name: ${COMPOSE_PROJECT_NAME}_gotenberg
+    hostname: gotenberg
+    networks:
+      default:
+        aliases:
+          - gotenberg
+    shm_size: "2g"
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+    command:
+      - "gotenberg"
+      - "--api-port=3000"
+      - "--api-timeout=300s"
+      - "--chromium-disable-routes=false"
+      - "--chromium-disable-web-security"
+      - "--chromium-ignore-certificate-errors"
+      - "--chromium-allow-insecure-localhost"
+
+  # ==============================================
+  # Frontend Service (SvelteKit)
+  # ==============================================
+  frontend:
+    image: ghcr.io/raxbyte-org/perjadin-kemnaker-ri-frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME}_frontend
+    labels:
+      - "io.containers.autoupdate=registry"
+    environment:
+      - PUBLIC_API_URL=${PUBLIC_API_URL}
+      - INTERNAL_API_URL=http://backend:8081
+      - VITE_API_URL=${VITE_API_URL:-/api/v1}
+      - BODY_SIZE_LIMIT=52428800
+      - HOST=0.0.0.0
+      - PORT=3000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_uploads:
+    driver: local

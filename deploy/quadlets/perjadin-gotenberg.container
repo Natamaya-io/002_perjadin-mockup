@@ -1,0 +1,19 @@
+[Unit]
+Description=Gotenberg PDF Rendering Microservice
+
+[Container]
+ContainerName=perjadin-gotenberg
+Image=docker.io/gotenberg/gotenberg:8
+Network=perjadin.network
+# Gotenberg uses 2g shm_size in compose. Podman uses ShmSize
+ShmSize=2g
+# Network aliases are handled automatically if using Quadlet networking, but hostname is useful
+HostName=gotenberg
+PublishPort=3001:3000
+Exec=gotenberg --api-port=3000 --api-timeout=300s --chromium-disable-routes=false --chromium-disable-web-security --chromium-ignore-certificate-errors --chromium-allow-insecure-localhost
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

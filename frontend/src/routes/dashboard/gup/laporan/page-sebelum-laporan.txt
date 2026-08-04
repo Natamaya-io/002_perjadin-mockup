@@ -1,0 +1,34 @@
+<svelte:head>
+    <title>Laporan dan Rekapitulasi GUP | Perjadin</title>
+</svelte:head>
+
+<div class="mx-auto max-w-7xl space-y-6 pb-20">
+    <div class="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        <p class="text-sm font-semibold text-blue-600">Modul GUP</p>
+
+        <h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-800">
+            Laporan dan Rekapitulasi GUP
+        </h1>
+
+        <p class="mt-2 text-sm text-slate-500">
+            Halaman ini akan menampilkan laporan realisasi dan rekapitulasi
+            pengajuan GUP.
+        </p>
+    </div>
+
+    <div class="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+        <div
+            class="flex min-h-64 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 text-center"
+        >
+            <div>
+                <h2 class="text-lg font-bold text-slate-800">
+                    Halaman laporan berhasil dibuat
+                </h2>
+
+                <p class="mt-2 text-sm text-slate-500">
+                    Data laporan belum tersedia karena API belum diintegrasikan.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>

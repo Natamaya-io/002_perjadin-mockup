@@ -1,0 +1,1 @@
+ALTER TABLE travel_costs ADD COLUMN details JSONB;
