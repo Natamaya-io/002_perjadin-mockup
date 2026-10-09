@@ -557,6 +557,82 @@ async updateGupLs(payload: {
     );
 }
 
+async getFinanceSources(
+    year: number = new Date().getFullYear()
+): Promise<import('./types').FinanceDashboard> {
+    return this.request<import('./types').FinanceDashboard>(
+        `/finance-sources?year=${encodeURIComponent(String(year))}`
+    );
+}
+
+async getFinanceSourceOptions(
+    year: number,
+    budgetType: 'GUP' | 'LS',
+    spdNumber: string = ''
+): Promise<import('./types').FinanceSourceOption[]> {
+    const params = new URLSearchParams();
+    params.set('year', String(year));
+    params.set('budgetType', budgetType);
+    if (spdNumber) {
+        params.set('spdNumber', spdNumber);
+    }
+
+    return this.request<import('./types').FinanceSourceOption[]>(
+        `/finance-sources/options?${params.toString()}`
+    );
+}
+
+async createFinanceSource(
+    payload: import('./types').SaveFinanceSourcePayload
+): Promise<import('./types').FinanceSource> {
+    return this.request<import('./types').FinanceSource>(
+        '/finance-sources',
+        {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }
+    );
+}
+
+async updateFinanceSource(
+    id: string,
+    payload: import('./types').SaveFinanceSourcePayload
+): Promise<import('./types').FinanceSource> {
+    return this.request<import('./types').FinanceSource>(
+        `/finance-sources/${encodeURIComponent(id)}`,
+        {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        }
+    );
+}
+
+async deleteFinanceSource(id: string): Promise<void> {
+    await this.request<{ message: string }>(
+        `/finance-sources/${encodeURIComponent(id)}`,
+        { method: 'DELETE' }
+    );
+}
+
+async createFinanceAllocation(
+    payload: import('./types').SaveFinanceAllocationPayload
+): Promise<import('./types').FinanceAllocation> {
+    return this.request<import('./types').FinanceAllocation>(
+        '/finance-sources/allocations',
+        {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        }
+    );
+}
+
+async deleteFinanceAllocation(id: string): Promise<void> {
+    await this.request<{ message: string }>(
+        `/finance-sources/allocations/${encodeURIComponent(id)}`,
+        { method: 'DELETE' }
+    );
+}
+
     // --- Dalkot ---
 
     async getDalkotMaster(): Promise<DalkotMasterData> {
@@ -636,6 +712,47 @@ async updateGupLs(payload: {
                 method: 'DELETE'
             }
         );
+    }
+
+    // --- Chatbot Financial Analytics ---
+
+    private chatbotQuery(params?: { year?: number; month?: number }): string {
+        const query = new URLSearchParams();
+        if (params?.year) query.set('year', String(params.year));
+        if (params?.month) query.set('month', String(params.month));
+        const value = query.toString();
+        return value ? `?${value}` : '';
+    }
+
+    async getChatbotGup(
+        params?: { year?: number; month?: number }
+    ): Promise<import('./types').ChatbotGupAnalysis> {
+        return this.request<import('./types').ChatbotGupAnalysis>(
+            `/chatbot/gup${this.chatbotQuery(params)}`
+        );
+    }
+
+    async getChatbotOutsideCity(
+        params?: { year?: number; month?: number }
+    ): Promise<import('./types').ChatbotOutsideCityAnalysis> {
+        return this.request<import('./types').ChatbotOutsideCityAnalysis>(
+            `/chatbot/luar-kota${this.chatbotQuery(params)}`
+        );
+    }
+
+    async getChatbotInsideCity(
+        params?: { year?: number; month?: number }
+    ): Promise<import('./types').ChatbotInsideCityAnalysis> {
+        return this.request<import('./types').ChatbotInsideCityAnalysis>(
+            `/chatbot/dalam-kota${this.chatbotQuery(params)}`
+        );
+    }
+
+    async sendChatbotMessage(message: string): Promise<import('./types').ChatbotMessageResponse> {
+        return this.request<import('./types').ChatbotMessageResponse>('/chatbot/message', {
+            method: 'POST',
+            body: JSON.stringify({ message })
+        });
     }
 
 }

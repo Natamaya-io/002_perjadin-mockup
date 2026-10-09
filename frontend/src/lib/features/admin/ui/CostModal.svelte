@@ -47,6 +47,76 @@
 
     let selectedLocationIndex = 0;
     let editingSpd = ''; // Added here
+    let selectedBudgetSource = '';
+    let selectedFinanceSourceId = '';
+    let financeSourceOptions = [];
+    let financeSourcesLoading = false;
+    let loadedFinanceOptionKey = '';
+    let initializedBudgetSourceRecordId = '';
+
+    $: selectedFinanceOption = financeSourceOptions.find(
+        (item) => item.id === selectedFinanceSourceId
+    ) || null;
+
+    // Sumber anggaran + sumber dana dipilih saat proses review. Reset hanya
+    // ketika modal dibuka untuk record yang berbeda supaya pilihan user tidak
+    // tertimpa oleh reactive update biaya di dalam modal.
+    $: if (open && record && initializedBudgetSourceRecordId !== record.id) {
+        selectedBudgetSource = record.budgetSource || '';
+        selectedFinanceSourceId = record.financeSourceId || '';
+        initializedBudgetSourceRecordId = record.id;
+        loadedFinanceOptionKey = '';
+    }
+
+    $: if (!open && initializedBudgetSourceRecordId) {
+        initializedBudgetSourceRecordId = '';
+        selectedBudgetSource = '';
+        selectedFinanceSourceId = '';
+        financeSourceOptions = [];
+        loadedFinanceOptionKey = '';
+    }
+
+    async function loadFinanceSourceOptions() {
+        if (!record || !selectedBudgetSource) {
+            financeSourceOptions = [];
+            return;
+        }
+
+        financeSourcesLoading = true;
+        try {
+            const recordDate = record.startDate ? new Date(record.startDate) : new Date();
+            const year = Number.isNaN(recordDate.getTime())
+                ? new Date().getFullYear()
+                : recordDate.getFullYear();
+
+            financeSourceOptions = await api.getFinanceSourceOptions(
+                year,
+                selectedBudgetSource,
+                record.spd || ''
+            );
+
+            if (
+                selectedFinanceSourceId &&
+                !financeSourceOptions.some((item) => item.id === selectedFinanceSourceId)
+            ) {
+                selectedFinanceSourceId = '';
+            }
+        } catch (error) {
+            console.error('Gagal memuat sumber dana:', error);
+            financeSourceOptions = [];
+            toast.error(error instanceof Error ? error.message : 'Daftar sumber dana gagal dimuat.');
+        } finally {
+            financeSourcesLoading = false;
+        }
+    }
+
+    $: if (open && record && selectedBudgetSource) {
+        const optionKey = `${record.id}|${record.spd || ''}|${selectedBudgetSource}`;
+        if (optionKey !== loadedFinanceOptionKey) {
+            loadedFinanceOptionKey = optionKey;
+            loadFinanceSourceOptions();
+        }
+    }
 
     $: if (open && record) {
         editingSpd = record.spd || ''; // Set value here
@@ -556,6 +626,25 @@
 
     function handleSave() {
         if (isReadOnly) return;
+
+        if (selectedBudgetSource !== 'GUP' && selectedBudgetSource !== 'LS') {
+            toast.warning('Pilih sumber anggaran GUP atau LS terlebih dahulu.');
+            return;
+        }
+
+        if (!selectedFinanceSourceId) {
+            toast.warning('Pilih Sumber Dana terlebih dahulu.');
+            return;
+        }
+
+        if (selectedFinanceOption && grandTotal > Number(selectedFinanceOption.available || 0)) {
+            toast.warning(
+                `Saldo ${selectedBudgetSource} pada sumber dana ini tidak mencukupi. ` +
+                `Tersedia ${formatCurrency(selectedFinanceOption.available)}.`
+            );
+            return;
+        }
+
         const error = validateCosts();
         if (error) {
             toast.error(error);
@@ -586,7 +675,14 @@
         editingCosts.dailyAllowanceRate = sbmRateAvg;
         editingCosts.dailyAllowanceDays = days;
 
-        dispatch('save', { editingCosts, grandTotal, pendingOtherUpdates: pendingOtherUpdatesToSave, spd: editingSpd });
+        dispatch('save', {
+            editingCosts,
+            grandTotal,
+            pendingOtherUpdates: pendingOtherUpdatesToSave,
+            spd: editingSpd,
+            budgetSource: selectedBudgetSource,
+            financeSourceId: selectedFinanceSourceId
+        });
     }
 </script>
 
@@ -618,6 +714,82 @@
     {/if}
 
     <div class="grid gap-4 md:gap-6 p-4 md:p-6 overflow-y-auto overflow-x-hidden bg-slate-50/50 custom-scrollbar flex-1 min-h-0 relative">
+
+        <!-- Sumber Anggaran -->
+        <div class="p-4 bg-white rounded-xl border border-amber-200 shadow-sm w-full space-y-2">
+            <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <div>
+                    <Label class="text-[10px] md:text-xs font-semibold uppercase text-slate-500 tracking-wider">Sumber Anggaran Perjalanan Dinas</Label>
+                    <p class="mt-1 text-xs text-slate-500">Pilih jenis anggaran yang digunakan untuk membiayai perjalanan dinas pada nomor SPD ini.</p>
+                </div>
+                {#if selectedBudgetSource}
+                    <span class="inline-flex self-start items-center rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border {selectedBudgetSource === 'GUP' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}">
+                        Anggaran {selectedBudgetSource}
+                    </span>
+                {/if}
+            </div>
+            <Select
+                bind:value={selectedBudgetSource}
+                on:change={() => {
+                    selectedFinanceSourceId = '';
+                    financeSourceOptions = [];
+                    loadedFinanceOptionKey = '';
+                }}
+                disabled={isReadOnly}
+                class="bg-slate-50 border-slate-200 h-10 text-sm {isReadOnly ? 'opacity-70 cursor-not-allowed pointer-events-none' : ''}"
+            >
+                <option value="">-- Pilih Jenis Anggaran --</option>
+                <option value="GUP">GUP - Ganti Uang Persediaan</option>
+                <option value="LS">LS - Pembayaran Langsung</option>
+            </Select>
+
+            <div class="mt-4 space-y-2">
+                <Label class="text-[10px] md:text-xs font-semibold uppercase text-slate-500 tracking-wider">Sumber Dana</Label>
+                <Select
+                    bind:value={selectedFinanceSourceId}
+                    disabled={isReadOnly || !selectedBudgetSource || financeSourcesLoading}
+                    class="bg-slate-50 border-slate-200 h-10 text-sm"
+                >
+                    <option value="">
+                        {financeSourcesLoading ? 'Memuat Sumber Dana...' : '-- Pilih Sumber Dana --'}
+                    </option>
+                    {#each financeSourceOptions as source}
+                        <option value={source.id}>
+                            {source.code} - {source.name} - Tersedia {formatCurrency(source.available)}
+                        </option>
+                    {/each}
+                </Select>
+
+                {#if selectedBudgetSource && !financeSourcesLoading && financeSourceOptions.length === 0}
+                    <p class="text-[11px] font-medium text-red-600">
+                        Belum ada sumber dana aktif yang memiliki saldo {selectedBudgetSource} pada tahun perjalanan ini.
+                    </p>
+                {/if}
+
+                {#if selectedFinanceOption}
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                        <div class="rounded-xl bg-blue-50 p-3">
+                            <p class="text-[10px] font-bold uppercase text-blue-500">Pagu {selectedBudgetSource}</p>
+                            <p class="mt-1 font-bold text-blue-800">{formatCurrency(selectedFinanceOption.allocated)}</p>
+                        </div>
+                        <div class="rounded-xl bg-amber-50 p-3">
+                            <p class="text-[10px] font-bold uppercase text-amber-500">Terpakai SPD Lain</p>
+                            <p class="mt-1 font-bold text-amber-800">{formatCurrency(selectedFinanceOption.usedOther)}</p>
+                        </div>
+                        <div class="rounded-xl bg-emerald-50 p-3">
+                            <p class="text-[10px] font-bold uppercase text-emerald-500">Saldo Tersedia</p>
+                            <p class="mt-1 font-bold text-emerald-800">{formatCurrency(selectedFinanceOption.available)}</p>
+                        </div>
+                    </div>
+                {/if}
+            </div>
+
+            {#if !selectedBudgetSource || !selectedFinanceSourceId}
+                <p class="text-[11px] font-medium text-amber-600">
+                    Jenis anggaran dan Sumber Dana wajib dipilih sebelum rincian biaya disimpan dan disetujui.
+                </p>
+            {/if}
+        </div>
 
         {#if editingCosts.details && editingCosts.details[selectedLocationIndex]}
 

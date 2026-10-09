@@ -16,7 +16,9 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/kemnaker/perjadin-backend/internal/config"
 	"github.com/kemnaker/perjadin-backend/internal/domain/auth"
+	"github.com/kemnaker/perjadin-backend/internal/domain/chatbot"
 	"github.com/kemnaker/perjadin-backend/internal/domain/dalkot"
+	"github.com/kemnaker/perjadin-backend/internal/domain/fundsource"
 	"github.com/kemnaker/perjadin-backend/internal/domain/gup"
 	"github.com/kemnaker/perjadin-backend/internal/domain/gupls"
 	"github.com/kemnaker/perjadin-backend/internal/domain/gupreport"
@@ -172,9 +174,17 @@ func main() {
 	gupLsSvc := gupls.NewService(gupLsRepo)
 	gupLsHandler := gupls.NewHandler(gupLsSvc)
 
+	fundSourceRepo := fundsource.NewRepository(db)
+	fundSourceSvc := fundsource.NewService(fundSourceRepo)
+	fundSourceHandler := fundsource.NewHandler(fundSourceSvc)
+
 	dalkotRepo := dalkot.NewRepository(db)
 	dalkotSvc := dalkot.NewService(dalkotRepo)
 	dalkotHandler := dalkot.NewHandler(dalkotSvc)
+
+	chatbotRepo := chatbot.NewRepository(db)
+	chatbotSvc := chatbot.NewService(chatbotRepo)
+	chatbotHandler := chatbot.NewHandler(chatbotSvc)
 
 	recordRepo := record.NewRepository(db)
 	recordSvc := record.NewService(
@@ -270,6 +280,48 @@ func main() {
 	protected.GET(
 		"/dashboard/summary",
 		recordHandler.GetDashboardSummary,
+	)
+
+	// Conversational chatbot entry point. The command is interpreted first;
+	// analytics are loaded only after a recognized user message.
+	protected.POST(
+		"/chatbot/message",
+		chatbotHandler.SendMessage,
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+			"protokol",
+		),
+	)
+
+	// Chatbot analytics. GUP is restricted to financial roles.
+	protected.GET(
+		"/chatbot/gup",
+		chatbotHandler.GetGUP,
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+		),
+	)
+	// Luar Kota and Dalam Kota are also available to Protokol,
+	// but the service automatically scopes Protokol users to their own data.
+	protected.GET(
+		"/chatbot/luar-kota",
+		chatbotHandler.GetOutsideCity,
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+			"protokol",
+		),
+	)
+	protected.GET(
+		"/chatbot/dalam-kota",
+		chatbotHandler.GetInsideCity,
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+			"protokol",
+		),
 	)
 
 	protected.GET(
@@ -450,6 +502,30 @@ func main() {
 		),
 	)
 
+	protected.GET(
+		"/finance-sources/options",
+		fundSourceHandler.GetSourceOptions,
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+			"protokol",
+		),
+	)
+
+	fundSourceGroup := protected.Group("/finance-sources")
+	fundSourceGroup.Use(
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+		),
+	)
+	fundSourceGroup.GET("", fundSourceHandler.GetDashboard)
+	fundSourceGroup.POST("", fundSourceHandler.CreateSource)
+	fundSourceGroup.PUT("/:id", fundSourceHandler.UpdateSource)
+	fundSourceGroup.DELETE("/:id", fundSourceHandler.DeleteSource)
+	fundSourceGroup.POST("/allocations", fundSourceHandler.CreateAllocation)
+	fundSourceGroup.DELETE("/allocations/:id", fundSourceHandler.DeleteAllocation)
+
 	dalkotGroup := protected.Group(
 		"/dalkot",
 	)
@@ -471,22 +547,22 @@ func main() {
 		dalkotHandler.GetMaster,
 	)
 	dalkotGroup.GET(
-	"/recap",
-	dalkotHandler.GetRecap,
-	middleware.RoleMiddleware(
-		"super_admin",
-		"kasubag",
-	),
-)
+		"/recap",
+		dalkotHandler.GetRecap,
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+		),
+	)
 
 	dalkotGroup.GET(
-	"/recap/monthly-spj",
-	dalkotHandler.GetMonthlySPJRecap,
-	middleware.RoleMiddleware(
-		"super_admin",
-		"kasubag",
-	),
-)
+		"/recap/monthly-spj",
+		dalkotHandler.GetMonthlySPJRecap,
+		middleware.RoleMiddleware(
+			"super_admin",
+			"kasubag",
+		),
+	)
 	dalkotGroup.GET(
 		"/:id",
 		dalkotHandler.GetByID,

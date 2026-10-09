@@ -75,6 +75,8 @@ export interface TravelRecord {
     agenda: string;
     status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
     reportStatus: 'Pending' | 'Completed' | 'Draft';
+    budgetSource?: 'GUP' | 'LS' | '';
+    financeSourceId?: string;
     totalCost: number;
     costs?: TravelCost;
     reportData?: TravelReport | null;
@@ -202,6 +204,15 @@ export interface ApiClient {
         id: string
     ): Promise<void>;
 
+    // Keuangan - Sumber Dana
+    getFinanceSources(year?: number): Promise<FinanceDashboard>;
+    getFinanceSourceOptions(year: number, budgetType: 'GUP' | 'LS', spdNumber?: string): Promise<FinanceSourceOption[]>;
+    createFinanceSource(payload: SaveFinanceSourcePayload): Promise<FinanceSource>;
+    updateFinanceSource(id: string, payload: SaveFinanceSourcePayload): Promise<FinanceSource>;
+    deleteFinanceSource(id: string): Promise<void>;
+    createFinanceAllocation(payload: SaveFinanceAllocationPayload): Promise<FinanceAllocation>;
+    deleteFinanceAllocation(id: string): Promise<void>;
+
     // Dalkot
     getDalkotMaster(): Promise<DalkotMasterData>;
     getDalkotList(): Promise<DalkotListResponse>;
@@ -211,6 +222,12 @@ export interface ApiClient {
     createDalkot(formData: FormData): Promise<DalkotRecord>;
     updateDalkot(id: string, formData: FormData): Promise<DalkotRecord>;
     deleteDalkot(id: string): Promise<void>;
+
+    // Chatbot Analytics
+    getChatbotGup(params?: { year?: number; month?: number }): Promise<ChatbotGupAnalysis>;
+    getChatbotOutsideCity(params?: { year?: number; month?: number }): Promise<ChatbotOutsideCityAnalysis>;
+    getChatbotInsideCity(params?: { year?: number; month?: number }): Promise<ChatbotInsideCityAnalysis>;
+    sendChatbotMessage(message: string): Promise<ChatbotMessageResponse>;
 }
 
 export interface GupProcurementType {
@@ -256,6 +273,86 @@ export interface GupTransaction {
     documentUrl?: string;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface FinanceSource {
+    id: string;
+    year: number;
+    code: string;
+    name: string;
+    amount: number;
+    allocatedGup: number;
+    allocatedLs: number;
+    allocatedTotal: number;
+    usedGup: number;
+    usedLs: number;
+    usedTotal: number;
+    remainingGup: number;
+    remainingLs: number;
+    remainingTotal: number;
+    available: number;
+    notes: string;
+    isActive: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface FinanceAllocation {
+    id: string;
+    financeSourceId: string;
+    sourceCode: string;
+    sourceName: string;
+    allocationType: 'GUP' | 'LS';
+    amount: number;
+    notes: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface FinanceSummary {
+    totalFunds: number;
+    totalGup: number;
+    totalLs: number;
+    totalUsedGup: number;
+    totalUsedLs: number;
+    totalUsed: number;
+    totalAllocated: number;
+    totalAvailable: number;
+    totalRemaining: number;
+}
+
+export interface FinanceSourceOption {
+    id: string;
+    year: number;
+    code: string;
+    name: string;
+    budgetType: 'GUP' | 'LS';
+    allocated: number;
+    usedOther: number;
+    available: number;
+}
+
+export interface FinanceDashboard {
+    year: number;
+    sources: FinanceSource[];
+    allocations: FinanceAllocation[];
+    summary: FinanceSummary;
+}
+
+export interface SaveFinanceSourcePayload {
+    year: number;
+    code: string;
+    name: string;
+    amount: number;
+    notes: string;
+    isActive: boolean;
+}
+
+export interface SaveFinanceAllocationPayload {
+    financeSourceId: string;
+    allocationType: 'GUP' | 'LS';
+    amount: number;
+    notes: string;
 }
 
 export type DalkotCategory =
@@ -418,3 +515,153 @@ export interface DalkotMonthlySPJRecapResponse {
     summary: DalkotMonthlySPJRecapSummary;
 }
 
+
+// ==========================================
+// Chatbot Financial Analytics
+// ==========================================
+
+export interface ChatbotPeriod {
+    year: number;
+    month: number;
+    label: string;
+}
+
+export interface ChatbotGupSummary {
+    totalLs: number;
+    totalRealization: number;
+    balance: number;
+    realizationPercentage: number;
+    transactionCount: number;
+    totalTax: number;
+}
+
+export interface ChatbotGupExpenseRank {
+    rank: number;
+    businessId: string;
+    paymentDescription: string;
+    procurementTypeName: string;
+    accountCode: string;
+    mak: string;
+    fundingSourceLabel: string;
+    recipient: string;
+    receiptDate: string;
+    paidAmount: number;
+}
+
+export interface ChatbotGupAccountRank {
+    rank: number;
+    accountCode: string;
+    mak: string;
+    paidAmount: number;
+    transactionCount: number;
+    percentage: number;
+}
+
+export interface ChatbotGupMonthlyRow {
+    monthNumber: number;
+    monthName: string;
+    gupLabel: string;
+    income: number;
+    realization: number;
+    balance: number;
+    transactionCount: number;
+    status: string;
+}
+
+export interface ChatbotGupAnalysis {
+    period: ChatbotPeriod;
+    summary: ChatbotGupSummary;
+    topExpenses: ChatbotGupExpenseRank[];
+    lowestExpenses: ChatbotGupExpenseRank[];
+    accountRanking: ChatbotGupAccountRank[];
+    largestAccount?: ChatbotGupAccountRank;
+    monthly: ChatbotGupMonthlyRow[];
+}
+
+export interface ChatbotTripStatusCount {
+    assigned: number;
+    inProgress: number;
+    completed: number;
+    rejected: number;
+}
+
+export interface ChatbotOutsideCityUserRow {
+    userId: string;
+    name: string;
+    email: string;
+    nip: string;
+    position: string;
+    totalTrips: number;
+    executedTrips: number;
+    executedCost: number;
+    statuses: ChatbotTripStatusCount;
+    rank: number;
+}
+
+export interface ChatbotOutsideCityAnalysis {
+    period: ChatbotPeriod;
+    summary: {
+        protocolUsers: number;
+        totalTrips: number;
+        executedTrips: number;
+        executedCost: number;
+        statuses: ChatbotTripStatusCount;
+    };
+    users: ChatbotOutsideCityUserRow[];
+}
+
+export interface ChatbotDalkotStatusCount {
+    draft: number;
+    pending: number;
+    success: number;
+}
+
+export interface ChatbotInsideCityUserRow {
+    userId: string;
+    name: string;
+    email: string;
+    nip: string;
+    position: string;
+    totalActivities: number;
+    executedActivities: number;
+    totalSpj: number;
+    totalRiil: number;
+    balance: number;
+    statuses: ChatbotDalkotStatusCount;
+    rank: number;
+}
+
+export interface ChatbotInsideCityAnalysis {
+    period: ChatbotPeriod;
+    summary: {
+        protocolUsers: number;
+        totalActivities: number;
+        executedActivities: number;
+        totalSpj: number;
+        totalRiil: number;
+        balance: number;
+        statuses: ChatbotDalkotStatusCount;
+    };
+    users: ChatbotInsideCityUserRow[];
+}
+
+export type ChatbotIntent =
+    | 'menu_gup'
+    | 'menu_luar_kota'
+    | 'menu_dalam_kota'
+    | 'gup_analysis'
+    | 'gup_ranking'
+    | 'gup_ls'
+    | 'gup_account'
+    | 'gup_chart'
+    | 'luar_kota_analysis'
+    | 'dalam_kota_analysis'
+    | 'unknown'
+    | 'empty';
+
+export interface ChatbotMessageResponse {
+    intent: ChatbotIntent | string;
+    message: string;
+    data?: ChatbotGupAnalysis | ChatbotOutsideCityAnalysis | ChatbotInsideCityAnalysis;
+    suggestions?: string[];
+}

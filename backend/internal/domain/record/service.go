@@ -205,7 +205,7 @@ func (s *service) CreateRecord(ctx context.Context, record *models.TravelRecord)
 					record.EndDate.Format("02 Jan 2006"),
 					record.Purpose,
 				)
-				
+
 				if waErr := utils.SendWhatsAppMessage(s.cfg, user.NomorHP, msg); waErr != nil {
 					fmt.Printf("Failed to send WhatsApp notification to %s: %v\n", user.NomorHP, waErr)
 				} else {
@@ -415,6 +415,16 @@ func (s *service) GetRecordByID(ctx context.Context, id uuid.UUID) (*models.Trav
 }
 
 func (s *service) UpdateRecord(ctx context.Context, record *models.TravelRecord) error {
+	if record.BudgetSource != "" && record.BudgetSource != "GUP" && record.BudgetSource != "LS" {
+		return fmt.Errorf("sumber anggaran harus GUP atau LS")
+	}
+	if record.BudgetSource != "" && record.FinanceSourceID == uuid.Nil {
+		return fmt.Errorf("sumber dana wajib dipilih untuk anggaran %s", record.BudgetSource)
+	}
+	if record.FinanceSourceID != uuid.Nil && record.BudgetSource == "" {
+		return fmt.Errorf("jenis anggaran GUP atau LS wajib dipilih")
+	}
+
 	if len(record.Locations) > 0 {
 		// Calculate overall start and end dates
 		var minStart, maxEnd time.Time
@@ -446,7 +456,7 @@ func (s *service) UpdateRecord(ctx context.Context, record *models.TravelRecord)
 					// We must fetch the original state of this record to see if its spd actually changed
 					original, errOrig := s.repo.GetTravelRecordByID(ctx, record.ID)
 					if errOrig == nil && original != nil && original.SPDNumber != record.SPDNumber {
-						// Allow if the existing record is actually a sibling from the same trip 
+						// Allow if the existing record is actually a sibling from the same trip
 						// (happens when the frontend loops and updates a group sequentially)
 						if er.Purpose == record.Purpose && er.Location == record.Location {
 							continue
@@ -460,7 +470,14 @@ func (s *service) UpdateRecord(ctx context.Context, record *models.TravelRecord)
 
 	err := s.repo.UpdateTravelRecord(ctx, record)
 	if err == nil {
-		s.invalidateRecordCaches(ctx, record.ID)
+		if record.BudgetSource != "" {
+			// budget_source disinkronkan untuk seluruh nomor SPD di repository.
+			// Bersihkan cache record individual agar semua pegawai pada SPD yang sama
+			// langsung membaca pilihan GUP/LS terbaru.
+			s.invalidateRecordCaches(ctx)
+		} else {
+			s.invalidateRecordCaches(ctx, record.ID)
+		}
 
 		// Resynchronize the sequence safely to accommodate manual SPD number overrides
 		go func(bgCtx context.Context) {

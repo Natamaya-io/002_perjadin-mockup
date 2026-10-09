@@ -13,7 +13,7 @@
     let isSidebarOpen = false;
     let expandedMenus = {
         perdin: false,
-        gup: false,
+        keuangan: false,
         dalkot: false
     };
     let lastActiveRoute = '';
@@ -66,8 +66,8 @@
             ]
         },
         {
-            id: 'gup',
-            label: 'GUP',
+            id: 'keuangan',
+            label: 'Keuangan',
             icon: icons.receipt,
             items: [
                 {
@@ -86,6 +86,12 @@
                 {
                     label: 'LS',
                     href: '/dashboard/gup/ls',
+                    icon: icons.cash,
+                    role: ['super_admin', 'kasubag']
+                },
+                {
+                    label: 'Sumber Dana',
+                    href: '/dashboard/keuangan/sumber-dana',
                     icon: icons.cash,
                     role: ['super_admin', 'kasubag']
                 }
@@ -174,7 +180,7 @@
         const shouldOpen = !expandedMenus[menuId];
         expandedMenus = {
             perdin: false,
-            gup: false,
+            keuangan: false,
             dalkot: false,
             [menuId]: shouldOpen
         };
@@ -185,7 +191,7 @@
         const activeMenu = nestedMenus.find((menu) => hasVisibleItems(menu) && isMenuActive(menu));
         expandedMenus = {
             perdin: activeMenu?.id === 'perdin',
-            gup: activeMenu?.id === 'gup',
+            keuangan: activeMenu?.id === 'keuangan',
             dalkot: activeMenu?.id === 'dalkot'
         };
     }

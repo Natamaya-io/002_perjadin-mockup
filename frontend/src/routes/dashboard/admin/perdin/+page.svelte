@@ -63,6 +63,8 @@
     let pendingGrandTotal = 0; // To store calculation result for confirmation
     let pendingOtherUpdatesToSave = []; // From split hotel feature
     let pendingSpdToSave = '';
+    let pendingBudgetSource = '';
+    let pendingFinanceSourceId = '';
 
     let isConfirmOpen = false;
     let isRejectConfirmOpen = false;
@@ -176,11 +178,20 @@
 
         pendingOtherUpdatesToSave = []; // Reset
         pendingSpdToSave = selectedRecord.spd || ''; // Reset pending SPD
+        pendingBudgetSource = selectedRecord.budgetSource || '';
+        pendingFinanceSourceId = selectedRecord.financeSourceId || '';
         isModalOpen = true;
     }
 
     function handleModalSave(event) {
-        const { editingCosts: newCosts, grandTotal, pendingOtherUpdates, spd } = event.detail;
+        const {
+            editingCosts: newCosts,
+            grandTotal,
+            pendingOtherUpdates,
+            spd,
+            budgetSource,
+            financeSourceId
+        } = event.detail;
 
         if (newCosts.localTransport > 500000) {
             toast.warning('Transport Lokal maksimal Rp 500.000');
@@ -192,6 +203,8 @@
         pendingGrandTotal = grandTotal;
         pendingOtherUpdatesToSave = pendingOtherUpdates || [];
         pendingSpdToSave = spd || selectedRecord.spd;
+        pendingBudgetSource = budgetSource || '';
+        pendingFinanceSourceId = financeSourceId || '';
         isConfirmOpen = true;
     }
 
@@ -211,6 +224,8 @@
                     spd: pendingSpdToSave, // Send the edited SPD
                     costs: { ...editingCosts },
                     totalCost: pendingGrandTotal,
+                    budgetSource: pendingBudgetSource,
+                    financeSourceId: pendingFinanceSourceId,
                     status: 'Approved'
                 }
             });
@@ -330,12 +345,35 @@
                 }
             }
 
+            // Sumber anggaran berlaku untuk satu perjalanan/SPD, bukan hanya
+            // satu pegawai. Sinkronkan GUP/LS ke seluruh record dengan SPD yang sama.
+            for (const sibling of allRecordsInSelectedSpd) {
+                const existingUpdate = updates.find((item) => item.id === sibling.id);
+                if (existingUpdate) {
+                    existingUpdate.data.budgetSource = pendingBudgetSource;
+                    existingUpdate.data.financeSourceId = pendingFinanceSourceId;
+                } else {
+                    updates.push({
+                        id: sibling.id,
+                        data: {
+                            budgetSource: pendingBudgetSource,
+                            financeSourceId: pendingFinanceSourceId
+                        }
+                    });
+                }
+            }
+
             await updateMultipleRecords(updates);
             
-            toast.success('Rincian biaya berhasil disimpan!');
+            toast.success(`Rincian biaya berhasil disimpan dengan anggaran ${pendingBudgetSource}!`);
             fetchRecords();
         } catch (e) {
-            toast.error('Gagal menyimpan perubahan.');
+            console.error('Gagal menyimpan rincian biaya:', e);
+            toast.error(
+                e instanceof Error
+                    ? e.message
+                    : 'Gagal menyimpan perubahan.'
+            );
         } finally {
             stopLoading();
             isModalOpen = false;
@@ -724,7 +762,7 @@
     <ConfirmationModal
         bind:open={isConfirmOpen}
         title="Simpan Rincian Biaya"
-        description="Apakah Anda yakin data rincian biaya ini sudah sesuai? Status akan diubah menjadi Approved."
+        description={`Apakah Anda yakin data rincian biaya ini sudah sesuai? Sumber anggaran: ${pendingBudgetSource || '-'}. Status akan diubah menjadi Approved.`}
         confirmText="Ya, Simpan & Approve"
         onConfirm={processSave}
     />

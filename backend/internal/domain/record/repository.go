@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -698,7 +699,6 @@ func (r *repository) GetTravelRecords(ctx context.Context, filters map[string]in
 		mc.TicketGoFile = nil
 		mc.ReceiptFiles = nil
 
-
 		costMap[c.TravelRecordID] = &mc
 	}
 
@@ -714,12 +714,12 @@ func (r *repository) GetTravelRecords(ctx context.Context, filters map[string]in
 	reportMap := make(map[uuid.UUID]*models.TravelReport)
 	for _, rep := range reports {
 		mr := mapDBReport(rep)
-		
+
 		// SECURITY & PERFORMANCE: Strip huge Base64 files from Report bulk response
 		mr.Files = nil
 		mr.SppdFile = nil
 		mr.SuratTugasFile = nil
-		
+
 		reportMap[rep.TravelRecordID] = &mr
 	}
 
@@ -815,6 +815,23 @@ func (r *repository) GetTravelRecordByID(ctx context.Context, id uuid.UUID) (*mo
 
 	rec := mapDBRecord(dbr)
 	recPtr := &rec
+
+	// budget_source dan finance_source_id dibaca langsung agar query SQLC
+	// lama tetap backward-compatible dengan migration 000025/000026.
+	var budgetSource sql.NullString
+	var financeSourceID uuid.NullUUID
+	if errBudget := r.d.QueryRowContext(
+		ctx,
+		`SELECT budget_source, finance_source_id
+		 FROM travel_records
+		 WHERE id = $1 AND deleted_at IS NULL`,
+		recPtr.ID,
+	).Scan(&budgetSource, &financeSourceID); errBudget == nil {
+		recPtr.BudgetSource = fromNullString(budgetSource)
+		if financeSourceID.Valid {
+			recPtr.FinanceSourceID = financeSourceID.UUID
+		}
+	}
 
 	emp, errEmp := r.GetUserByID(ctx, recPtr.EmployeeID)
 	if errEmp != nil {
@@ -1075,6 +1092,44 @@ func (r *repository) UpdateTravelRecord(ctx context.Context, record *models.Trav
 		return fmt.Errorf("UpdateTravelRecord: %w", err)
 	}
 
+	// Simpan jenis anggaran dan sumber dana. Keduanya berlaku untuk seluruh
+	// pegawai dalam nomor SPD yang sama.
+	var budgetSource interface{}
+	if record.BudgetSource != "" {
+		budgetSource = record.BudgetSource
+	}
+
+	var financeSource interface{}
+	if record.FinanceSourceID != uuid.Nil {
+		financeSource = record.FinanceSourceID
+	}
+
+	if record.SPDNumber != "" {
+		if _, err := tx.ExecContext(
+			ctx,
+			`UPDATE travel_records
+			 SET budget_source = $2, finance_source_id = $3
+			 WHERE spd_number = $1 AND deleted_at IS NULL`,
+			record.SPDNumber,
+			budgetSource,
+			financeSource,
+		); err != nil {
+			return fmt.Errorf("UpdateTravelRecord finance source by SPD: %w", err)
+		}
+	} else {
+		if _, err := tx.ExecContext(
+			ctx,
+			`UPDATE travel_records
+			 SET budget_source = $2, finance_source_id = $3
+			 WHERE id = $1 AND deleted_at IS NULL`,
+			record.ID,
+			budgetSource,
+			financeSource,
+		); err != nil {
+			return fmt.Errorf("UpdateTravelRecord finance source: %w", err)
+		}
+	}
+
 	// Update locations (simpler to delete and recreate)
 	if err := qtx.DeleteTravelLocationsByRecordID(ctx, record.ID); err != nil {
 		return fmt.Errorf("DeleteTravelLocationsByRecordID: %w", err)
@@ -1185,11 +1240,181 @@ func (r *repository) UpdateTravelRecord(ctx context.Context, record *models.Trav
 		}
 	}
 
+	// Sinkronkan realisasi ke Sumber Dana setelah status/total biaya terbaru
+	// sudah tersimpan dalam transaksi ini.
+	if record.SPDNumber != "" {
+		if err := syncFinanceUsageBySpdTx(ctx, tx, record.SPDNumber); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
 
+// syncFinanceUsageBySpdTx menjaga satu nomor SPD hanya mempunyai satu baris
+// realisasi. Edit nominal, pindah GUP/LS, atau pindah sumber dana akan melakukan
+// UPDATE pada baris yang sama sehingga tidak terjadi pemotongan ganda.
+func syncFinanceUsageBySpdTx(ctx context.Context, tx *sql.Tx, spdNumber string) error {
+	if spdNumber == "" {
+		return nil
+	}
+
+	var budgetType sql.NullString
+	var financeSourceID uuid.NullUUID
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT budget_source, finance_source_id
+		 FROM travel_records
+		 WHERE spd_number = $1 AND deleted_at IS NULL
+		 LIMIT 1`,
+		spdNumber,
+	).Scan(&budgetType, &financeSourceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, deleteErr := tx.ExecContext(ctx, `DELETE FROM finance_usages WHERE spd_number = $1`, spdNumber)
+		return deleteErr
+	}
+	if err != nil {
+		return fmt.Errorf("read finance choice for SPD: %w", err)
+	}
+
+	if !budgetType.Valid || !financeSourceID.Valid {
+		_, deleteErr := tx.ExecContext(ctx, `DELETE FROM finance_usages WHERE spd_number = $1`, spdNumber)
+		return deleteErr
+	}
+
+	if budgetType.String != "GUP" && budgetType.String != "LS" {
+		return fmt.Errorf("jenis anggaran %q tidak valid", budgetType.String)
+	}
+
+	var approvedTotal int64
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(ROUND(SUM(total_cost)), 0)::BIGINT
+		 FROM travel_records
+		 WHERE spd_number = $1
+		   AND deleted_at IS NULL
+		   AND status = 'Approved'`,
+		spdNumber,
+	).Scan(&approvedTotal)
+	if err != nil {
+		return fmt.Errorf("calculate approved SPD cost: %w", err)
+	}
+
+	if approvedTotal <= 0 {
+		_, deleteErr := tx.ExecContext(ctx, `DELETE FROM finance_usages WHERE spd_number = $1`, spdNumber)
+		return deleteErr
+	}
+
+	// Lock sumber dana supaya dua approval bersamaan tidak bisa melampaui pagu.
+	var isActive bool
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT is_active FROM finance_sources WHERE id = $1 FOR UPDATE`,
+		financeSourceID.UUID,
+	).Scan(&isActive)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("sumber dana tidak ditemukan")
+	}
+	if err != nil {
+		return fmt.Errorf("lock sumber dana: %w", err)
+	}
+	if !isActive {
+		return fmt.Errorf("sumber dana yang dipilih sudah nonaktif")
+	}
+
+	var allocated int64
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(SUM(amount), 0)::BIGINT
+		 FROM finance_allocations
+		 WHERE finance_source_id = $1 AND allocation_type = $2`,
+		financeSourceID.UUID,
+		budgetType.String,
+	).Scan(&allocated)
+	if err != nil {
+		return fmt.Errorf("calculate finance allocation: %w", err)
+	}
+	if allocated <= 0 {
+		return fmt.Errorf("sumber dana belum mempunyai alokasi %s", budgetType.String)
+	}
+
+	var usedOther int64
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(SUM(amount), 0)::BIGINT
+		 FROM finance_usages
+		 WHERE finance_source_id = $1
+		   AND budget_type = $2
+		   AND spd_number <> $3`,
+		financeSourceID.UUID,
+		budgetType.String,
+		spdNumber,
+	).Scan(&usedOther)
+	if err != nil {
+		return fmt.Errorf("calculate finance usage: %w", err)
+	}
+
+	available := allocated - usedOther
+	if approvedTotal > available {
+		return fmt.Errorf(
+			"saldo %s tidak mencukupi: kebutuhan Rp%d, saldo tersedia Rp%d",
+			budgetType.String,
+			approvedTotal,
+			available,
+		)
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO finance_usages (
+			spd_number, finance_source_id, budget_type, amount
+		 ) VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (spd_number)
+		 DO UPDATE SET
+			finance_source_id = EXCLUDED.finance_source_id,
+			budget_type = EXCLUDED.budget_type,
+			amount = EXCLUDED.amount,
+			updated_at = CURRENT_TIMESTAMP`,
+		spdNumber,
+		financeSourceID.UUID,
+		budgetType.String,
+		approvedTotal,
+	)
+	if err != nil {
+		return fmt.Errorf("save finance usage: %w", err)
+	}
+
+	return nil
+}
+
 func (r *repository) DeleteTravelRecord(ctx context.Context, id uuid.UUID) error {
-	return r.q.DeleteTravelRecord(ctx, id)
+	tx, err := r.d.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var spdNumber sql.NullString
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT spd_number FROM travel_records WHERE id = $1`,
+		id,
+	).Scan(&spdNumber); err != nil {
+		return err
+	}
+
+	qtx := r.q.WithTx(tx)
+	if err := qtx.DeleteTravelRecord(ctx, id); err != nil {
+		return err
+	}
+
+	if spdNumber.Valid && spdNumber.String != "" {
+		if err := syncFinanceUsageBySpdTx(ctx, tx, spdNumber.String); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (r *repository) DeleteTravelRecordsBySpd(ctx context.Context, spd string) error {
@@ -1210,6 +1435,12 @@ func (r *repository) DeleteTravelRecordsBySpd(ctx context.Context, spd string) e
 
 	if err := qtx.DeleteTravelRecordBySpd(ctx, spdStr); err != nil {
 		return err
+	}
+
+	if spd != "" {
+		if err := syncFinanceUsageBySpdTx(ctx, tx, spd); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
@@ -1488,7 +1719,7 @@ func (r *repository) GetPaginatedRecords(ctx context.Context, params models.Pagi
 		mc.TicketGoFile = nil
 		mc.ReceiptFiles = nil
 		mc.AdditionalCosts = nil // Also contains base64 files!
-		mc.Details = nil // Also contains base64 files!
+		mc.Details = nil         // Also contains base64 files!
 
 		costMap[c.TravelRecordID] = &mc
 	}

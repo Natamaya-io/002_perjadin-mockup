@@ -51,6 +51,8 @@ type TravelRecord struct {
 	Location         string           `json:"location"`
 	ReportStatus     string           `json:"reportStatus"`
 	PaymentStatus    string           `json:"paymentStatus"`
+	BudgetSource     string           `json:"budgetSource"`
+	FinanceSourceID  uuid.UUID        `json:"financeSourceId,omitempty"`
 	EmployeeIDs      []uuid.UUID      `json:"employeeIds,omitempty"`
 	Locations        []TravelLocation `json:"locations,omitempty"`
 	TotalCost        float64          `json:"totalCost"`

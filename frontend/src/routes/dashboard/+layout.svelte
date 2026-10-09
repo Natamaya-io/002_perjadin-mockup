@@ -26,6 +26,7 @@
         { path: '/dashboard/pengajuan/new', roles: ['super_admin', 'kasubag'] },
         { path: '/dashboard/admin/perdin', roles: ['super_admin', 'kasubag'] },
         { path: "/dashboard/gup", roles: ["super_admin", "kasubag"] },
+        { path: '/dashboard/chatbot', roles: ['super_admin', 'kasubag', 'protokol'] },
         { path: "/dashboard/dalkot/rekap", roles: ["super_admin", "kasubag"] },
         { path: "/dashboard/dalkot", roles: ["super_admin", "kasubag", "protokol"] },
         { path: '/dashboard/billing-protokol', roles: ['protokol', 'super_admin', 'kasubag'] },
